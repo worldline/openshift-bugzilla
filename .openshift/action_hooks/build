@@ -1,0 +1,58 @@
+#!/bin/bash
+cd $OPENSHIFT_DATA_DIR
+rm -Rf bugzilla bugzilla-STABLE.tar.gz
+wget http://ftp.mozilla.org/pub/mozilla.org/webtools/bugzilla-STABLE.tar.gz
+tar xzf bugzilla-STABLE.tar.gz --transform 's/bugzilla-[0-9]\.[0-9]\.[0-9]/bugzilla/'
+cd bugzilla
+rm $OPENSHIFT_REPO_DIR/perl/*
+mv * $OPENSHIFT_REPO_DIR/perl/
+cd $OPENSHIFT_REPO_DIR
+MODS=`./checksetup.pl --check-modules 2>/dev/null| egrep '.*install-module.pl [a-zA-Z].*' | sed 's/.*install-module.pl //'`
+for mod in $MODS
+do
+  ./install-module.pl $mod
+done
+./install-module.pl GD::Graph
+./install-module.pl Daemon::Generic
+./install-module.pl DBD::Pg
+
+cat > init.pl << EOF
+answer{'db_host'} = '$OPENSHIFT_POSTGRESQL_DB_HOST';
+answer{'db_driver'} = 'Pg';
+answer{'db_port'} = $OPENSHIFT_POSTGRESQL_DB_PORT;
+answer{'db_name'} = '$PGDATABASE';
+answer{'db_user'} = '$OPENSHIFT_POSTGRESQL_DB_USERNAME';
+answer{'db_pass'} = '$OPENSHIFT_POSTGRESQL_DB_PASSWORD';
+answer{'urlbase'} = 'http://$OPENSHIFT_GEAR_DNS';
+answer{'webservergroup'} = '$USER';
+answer{'ADMIN_EMAIL'} = 'admin@admin.com';
+answer{'ADMIN_PASSWORD'} = 'bugzilla';
+answer{'SMTP_SERVER'} = '127.0.0.1';
+answer{'NO_PAUSE'} = 1;
+EOF
+
+./checksetup.pl init.pl
+
+cat > $OPENSHIFT_PERL_DIR/etc/conf.d/openshift.conf << EOF
+LoadModule cgi_module modules/mod_cgi.so
+DirectoryIndex index.cgi
+ServerRoot "$OPENSHIFT_PERL_DIR"
+DocumentRoot "$OPENSHIFT_REPO_DIR/perl"
+Listen $OPENSHIFT_PERL_IP:$OPENSHIFT_PERL_PORT
+User $USER
+Group $USER
+<IfVersion >= 2.4>
+DefaultRuntimeDir "$OPENSHIFT_PERL_DIR/run"
+</IfVersion>
+
+ErrorLog "|/usr/sbin/rotatelogs $OPENSHIFT_PERL_DIR/logs/error_log-%Y%m%d-%H%M%S-%Z 86400"
+CustomLog "|/usr/sbin/rotatelogs $OPENSHIFT_PERL_DIR/logs/access_log-%Y%m%d-%H%M%S-%Z 86400" combined
+
+<Directory $OPENSHIFT_REPO_DIR/perl>
+    AddHandler cgi-script .cgi
+    Options +ExecCGI
+    DirectoryIndex index.cgi index.html
+    AllowOverride Limit FileInfo Indexes Options
+</Directory>
+EOF
+
